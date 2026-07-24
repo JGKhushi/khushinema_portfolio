@@ -15,6 +15,35 @@ export const notFound = (req, _res, next) => {
 const normalise = (error) => {
   if (error instanceof ApiError) return error;
 
+  // Malformed JSON body → body-parser throws a SyntaxError tagged with `type`.
+  if (error?.type === 'entity.parse.failed' || (error instanceof SyntaxError && 'body' in error)) {
+    return ApiError.badRequest('Request body is not valid JSON');
+  }
+
+  // Body larger than the configured limit.
+  if (error?.type === 'entity.too.large' || error?.status === 413) {
+    return ApiError.tooLarge('Request body is too large (limit 1 MB)');
+  }
+
+  // Origin blocked by our CORS policy — a client problem, not a server fault.
+  if (typeof error?.message === 'string' && error.message.startsWith('Origin not allowed by CORS')) {
+    return ApiError.forbidden('This origin is not allowed to call the API');
+  }
+
+  // Request exceeded the server timeout guard.
+  if (error?.code === 'ETIMEDOUT' || error?.name === 'RequestTimeoutError') {
+    return new ApiError(503, 'The request took too long to process');
+  }
+
+  // Database unreachable / not yet connected.
+  if (
+    error instanceof mongoose.Error.MongooseServerSelectionError ||
+    error?.name === 'MongoNotConnectedError' ||
+    error?.name === 'MongoNetworkError'
+  ) {
+    return ApiError.unavailable('The database is temporarily unavailable — please retry shortly');
+  }
+
   if (error instanceof ZodError) {
     return ApiError.badRequest(
       'Validation failed',
@@ -48,8 +77,15 @@ const normalise = (error) => {
 export const errorHandler = (error, req, res, next) => {
   const normalised = normalise(error);
 
+  // Only genuine faults deserve a stack trace. Operational errors we raised on
+  // purpose (503 while the DB is down, 4xx from validation) log as one concise
+  // line — otherwise an unreachable database floods the log with fake crashes.
   if (normalised.statusCode >= 500) {
-    logger.error(`${req.method} ${req.originalUrl}`, error?.stack ?? error);
+    if (normalised.isOperational) {
+      logger.warn(`${req.method} ${req.originalUrl} → ${normalised.statusCode} ${normalised.message}`);
+    } else {
+      logger.error(`${req.method} ${req.originalUrl}`, error?.stack ?? error);
+    }
   }
 
   res.status(normalised.statusCode).json({
@@ -57,7 +93,8 @@ export const errorHandler = (error, req, res, next) => {
     error: {
       message: normalised.message,
       ...(normalised.details ? { details: normalised.details } : {}),
-      ...(env.isProd ? {} : { stack: error?.stack }),
+      // Stack only for unexpected faults, and never in production.
+      ...(env.isProd || normalised.isOperational ? {} : { stack: error?.stack }),
     },
   });
 };

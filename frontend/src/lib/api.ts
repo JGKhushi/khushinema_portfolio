@@ -6,7 +6,8 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? '/api/v1';
 interface ApiEnvelope<T> {
   success: boolean;
   data: T;
-  message?: string;
+  /** Failure envelope: { success: false, error: { message, details } }. */
+  error?: { message?: string; details?: { field: string; message: string }[] };
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -14,9 +15,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   });
-  const body = (await res.json()) as ApiEnvelope<T> & { message?: string };
+  const body = (await res.json()) as ApiEnvelope<T>;
   if (!res.ok || body.success === false) {
-    throw new Error(body?.message || `Request failed with ${res.status}`);
+    // Prefer the first field-level issue — it says exactly what to fix.
+    const detail = body?.error?.details?.[0];
+    const message = detail
+      ? `${detail.field}: ${detail.message}`
+      : body?.error?.message || `Request failed with ${res.status}`;
+    throw new Error(message);
   }
   return body.data;
 }
@@ -30,11 +36,26 @@ export async function fetchOverview(signal?: AbortSignal): Promise<{ data: Overv
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
     signal?.addEventListener('abort', () => controller.abort());
-    const data = await request<Overview>('/overview', { signal: controller.signal });
+    // `no-store` so a just-published edit is never masked by a cached copy.
+    const data = await request<Overview>('/overview', {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
     clearTimeout(timeout);
     if (!data?.profile) throw new Error('Malformed overview payload');
     return { data, live: true };
-  } catch {
+  } catch (error) {
+    // The bundled snapshot is a last resort for when the API is unreachable.
+    // It is frozen at build time, so it can show content that has since been
+    // deleted — say so loudly rather than letting it look like live data.
+    if (import.meta.env.DEV) {
+      console.warn(
+        '[portfolio] Live API unavailable — rendering the bundled snapshot from ' +
+          'src/data/fallback.ts. Content edited in /admin will NOT appear until the ' +
+          'API is reachable again.',
+        error,
+      );
+    }
     return { data: fallbackOverview, live: false };
   }
 }

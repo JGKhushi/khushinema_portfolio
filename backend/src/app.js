@@ -9,6 +9,7 @@ import env from './config/env.js';
 import routes from './routes/index.js';
 import { apiLimiter } from './middleware/rateLimiters.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
+import { requestTimeout } from './middleware/guards.js';
 
 export function createApp() {
   const app = express();
@@ -24,15 +25,22 @@ export function createApp() {
       origin(origin, callback) {
         // Same-origin, curl and server-to-server calls arrive with no Origin.
         if (!origin || env.CORS_ORIGINS.includes(origin)) return callback(null, true);
-        return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+        // Reject without throwing: CORS headers are simply omitted, so the
+        // browser blocks it — but the request never becomes a 500 on our side.
+        return callback(null, false);
       },
       credentials: true,
     }),
   );
+
+  // No single request may hang the process open indefinitely.
+  app.use(requestTimeout(20_000));
+
+  // Reject oversized/malformed bodies early; the error handler maps them to 4xx.
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
   app.use(cookieParser());
-  app.use(morgan(env.isProd ? 'combined' : 'dev'));
+  app.use(morgan(env.isProd ? 'combined' : 'dev', { skip: () => env.NODE_ENV === 'test' }));
 
   app.use('/api', apiLimiter);
   app.use('/api/v1', routes);

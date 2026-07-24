@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import createCrudRouter from './createCrudRouter.js';
 import validate from '../middleware/validate.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireDB } from '../middleware/guards.js';
 import { contactLimiter, authLimiter } from '../middleware/rateLimiters.js';
 
 import projectController from '../controllers/project.controller.js';
@@ -54,6 +55,13 @@ router.get('/health', (_req, res) => {
     },
   });
 });
+
+/**
+ * Everything past this point touches the database. If it is not connected,
+ * respond with a fast 503 instead of letting each query hang until it times out.
+ * (The health check above stays reachable so monitoring still works.)
+ */
+router.use(requireDB);
 
 /* ------------------------------------------------------------------ auth -- */
 const authRouter = Router();

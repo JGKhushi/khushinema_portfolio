@@ -9,6 +9,8 @@ import {
   fetchProfile,
   updateProfile,
   type Collection,
+  type ApiError,
+  type FieldIssue,
 } from '../../lib/adminApi';
 import { Field } from '../Field';
 
@@ -34,6 +36,7 @@ export function ContentEditor({ target, title, template }: Props) {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [error, setError] = useState('');
+  const [issues, setIssues] = useState<FieldIssue[]>([]);
 
   async function load() {
     setLoading(true);
@@ -83,6 +86,7 @@ export function ContentEditor({ target, title, template }: Props) {
     setSaving(true);
     setStatus('idle');
     setError('');
+    setIssues([]);
     try {
       const payload = stripHidden(draft);
       let saved: Item;
@@ -99,8 +103,10 @@ export function ContentEditor({ target, title, template }: Props) {
       setDraft(structuredClone(saved));
       setTimeout(() => setStatus('idle'), 2500);
     } catch (err) {
+      const apiErr = err as ApiError;
       setStatus('error');
-      setError(err instanceof Error ? err.message : 'Save failed');
+      setError(apiErr?.message ?? 'Save failed');
+      setIssues(apiErr?.details ?? []);
     } finally {
       setSaving(false);
     }
@@ -150,8 +156,29 @@ export function ContentEditor({ target, title, template }: Props) {
       </header>
 
       {error && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-300 ring-1 ring-red-500/20">
-          <AlertCircle className="h-4 w-4" /> {error}
+        <div className="mb-4 rounded-lg bg-red-500/10 px-4 py-3 ring-1 ring-red-500/20">
+          <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
+            <AlertCircle className="h-4 w-4" /> {error}
+          </div>
+          {issues.length > 0 && (
+            <>
+              <p className="mt-2 text-xs text-red-200/70">
+                Fix {issues.length === 1 ? 'this field' : 'these fields'} and save again:
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {issues.map((issue, i) => (
+                  <li key={i} className="flex flex-wrap items-baseline gap-2 text-sm text-red-200">
+                    <code className="rounded bg-red-500/15 px-1.5 py-0.5 font-mono text-xs text-red-100">
+                      {humanize(issue.field) || '(body)'}
+                    </code>
+                    <span>
+                      {humanisePath(issue.field)} {issue.message}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       )}
 
@@ -208,6 +235,7 @@ export function ContentEditor({ target, title, template }: Props) {
                         name={key}
                         value={draft[key]}
                         onChange={(v) => setField(key, v)}
+                        error={errorForField(issues, key)}
                       />
                     ))}
                 </div>
@@ -248,6 +276,37 @@ export function ContentEditor({ target, title, template }: Props) {
       )}
     </div>
   );
+}
+
+/**
+ * Matches a server issue to a top-level form field. The API reports nested
+ * paths like `highlights.0.text`, so we compare on the first path segment.
+ */
+function errorForField(issues: FieldIssue[], key: string): string | undefined {
+  const hit = issues.find((i) => i.field === key || i.field.startsWith(`${key}.`));
+  if (!hit) return undefined;
+  return hit.field === key ? hit.message : `${humanisePath(hit.field)} ${hit.message}`;
+}
+
+/**
+ * Turns a Zod path into something readable: `highlights.0.text` becomes
+ * `Item 1 → "text":`. Array indices are zero-based on the wire but shown
+ * one-based, because "item 0" means nothing to a person editing a list.
+ */
+/** `highlights.0.text` → `Highlights` — names the box the issue belongs to. */
+function humanize(path: string): string {
+  const head = path.split('.')[0] ?? '';
+  return head.replace(/([A-Z])/g, ' $1').replace(/^\w/, (c) => c.toUpperCase()).trim();
+}
+
+function humanisePath(path: string): string {
+  const [, ...rest] = path.split('.'); // drop the field name — it labels the box already
+  const parts: string[] = [];
+  for (const segment of rest) {
+    if (/^\d+$/.test(segment)) parts.push(`Item ${Number(segment) + 1}`);
+    else parts.push(`"${segment}"`);
+  }
+  return parts.length ? `${parts.join(' → ')}:` : '';
 }
 
 function idOf(item: Item): string {

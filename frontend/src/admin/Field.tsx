@@ -1,5 +1,42 @@
 import { useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Info } from 'lucide-react';
+
+/**
+ * Fields the API expects as arrays-of-objects (or fixed-shape objects). An
+ * empty `[]` is indistinguishable from a list of strings, so these are declared
+ * explicitly — otherwise the editor would offer a tag input and the API would
+ * reject the strings it produced.
+ */
+const SHAPES: Record<string, { example: unknown; hint: string }> = {
+  highlights: {
+    example: { text: 'What was achieved', metric: '' },
+    hint: 'Each item needs "text" (required) and an optional "metric".',
+  },
+  skills: {
+    example: { name: 'Skill name', level: 80, note: '' },
+    hint: 'Each item needs "name", plus optional "level" (0–100) and "note".',
+  },
+  workstreams: {
+    example: { name: 'Project name', url: 'https://example.com', summary: 'What you did' },
+    hint: 'Each item needs "name" and "summary", plus an optional "url".',
+  },
+  socials: {
+    example: { label: 'GitHub', handle: 'username', url: 'https://github.com/u', icon: 'github', order: 1 },
+    hint: 'Each item needs "label" and a valid "url".',
+  },
+  stats: {
+    example: { label: 'Label', value: '10', caption: '' },
+    hint: 'Each item needs "label" and "value" (both text).',
+  },
+  links: {
+    example: { github: '', live: '' },
+    hint: 'Only "github", "live" and "caseStudy" are allowed, and each must be a full URL (https://…). Other keys are ignored.',
+  },
+  availability: {
+    example: { status: 'open', message: '' },
+    hint: '"status" must be one of: open, selective, closed.',
+  },
+};
 
 /**
  * Infers a sensible editor from a value's shape:
@@ -15,16 +52,34 @@ export function Field({
   name,
   value,
   onChange,
+  error,
 }: {
   name: string;
   value: unknown;
   onChange: (v: unknown) => void;
+  /** Server-side message for this field, shown inline. */
+  error?: string;
 }) {
   const label = humanize(name);
+  const shape = SHAPES[name];
+
+  // Structured fields always get the JSON editor + a shape hint, even when the
+  // current value is an empty array (which would otherwise look like a tag list).
+  if (shape) {
+    return (
+      <Row label={`${label} (JSON)`} error={error} hint={shape.hint}>
+        <JsonEditor
+          value={value}
+          onChange={onChange}
+          addExample={Array.isArray(value) ? shape.example : undefined}
+        />
+      </Row>
+    );
+  }
 
   if (typeof value === 'boolean') {
     return (
-      <Row label={label}>
+      <Row label={label} error={error}>
         <button
           type="button"
           onClick={() => onChange(!value)}
@@ -44,7 +99,7 @@ export function Field({
 
   if (typeof value === 'number') {
     return (
-      <Row label={label}>
+      <Row label={label} error={error}>
         <input
           type="number"
           value={value}
@@ -58,7 +113,7 @@ export function Field({
   if (typeof value === 'string') {
     const long = value.length > 80 || name === 'summary' || name === 'description' || name === 'detail';
     return (
-      <Row label={label}>
+      <Row label={label} error={error}>
         {long ? (
           <textarea
             rows={3}
@@ -76,7 +131,7 @@ export function Field({
   // Array of plain strings → tag editor
   if (Array.isArray(value) && value.every((v) => typeof v === 'string')) {
     return (
-      <Row label={label}>
+      <Row label={label} error={error}>
         <TagEditor values={value as string[]} onChange={onChange} />
       </Row>
     );
@@ -84,19 +139,36 @@ export function Field({
 
   // Everything else (objects, arrays of objects, null) → JSON editor
   return (
-    <Row label={`${label} (JSON)`}>
+    <Row label={`${label} (JSON)`} error={error}>
       <JsonEditor value={value} onChange={onChange} />
     </Row>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+  error,
+  hint,
+}: {
+  label: string;
+  children: React.ReactNode;
+  error?: string;
+  hint?: string;
+}) {
   return (
-    <label className="block">
+    <label className={`block rounded-lg ${error ? 'ring-1 ring-red-500/40 p-3 -m-1 bg-red-500/[0.04]' : ''}`}>
       <span className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-500">
         {label}
       </span>
+      {hint && (
+        <span className="mb-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-500">
+          <Info className="mt-0.5 h-3 w-3 shrink-0" />
+          {hint}
+        </span>
+      )}
       {children}
+      {error && <span className="mt-1.5 block text-xs font-medium text-red-300">⚠ {error}</span>}
     </label>
   );
 }
@@ -153,14 +225,40 @@ function TagEditor({ values, onChange }: { values: string[]; onChange: (v: strin
   );
 }
 
-function JsonEditor({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
-  const [text, setText] = useState(() => JSON.stringify(value, null, 2));
+function JsonEditor({
+  value,
+  onChange,
+  addExample,
+}: {
+  value: unknown;
+  onChange: (v: unknown) => void;
+  /** When set, shows an "Add item" button that appends this template. */
+  addExample?: unknown;
+}) {
+  const [text, setText] = useState(() => JSON.stringify(value ?? null, null, 2));
   const [err, setErr] = useState('');
+
+  const write = (next: unknown) => {
+    setText(JSON.stringify(next, null, 2));
+    onChange(next);
+    setErr('');
+  };
+
+  const addItem = () => {
+    let current: unknown[] = [];
+    try {
+      const parsed = JSON.parse(text);
+      current = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      current = [];
+    }
+    write([...current, structuredClone(addExample)]);
+  };
 
   return (
     <div>
       <textarea
-        rows={Math.min(14, text.split('\n').length + 1)}
+        rows={Math.min(16, text.split('\n').length + 1)}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -168,13 +266,24 @@ function JsonEditor({ value, onChange }: { value: unknown; onChange: (v: unknown
             onChange(JSON.parse(e.target.value));
             setErr('');
           } catch {
-            setErr('Invalid JSON — changes paused until fixed');
+            setErr('Invalid JSON — fix the syntax before saving');
           }
         }}
         spellCheck={false}
         className="input resize-y font-mono text-xs leading-relaxed"
       />
-      {err && <p className="mt-1 text-xs text-amber-300">{err}</p>}
+      <div className="mt-1.5 flex items-center gap-3">
+        {addExample !== undefined && (
+          <button
+            type="button"
+            onClick={addItem}
+            className="inline-flex items-center gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] text-slate-300 hover:bg-white/10 hover:text-white"
+          >
+            <Plus className="h-3 w-3" /> Add item
+          </button>
+        )}
+        {err && <p className="text-xs text-amber-300">{err}</p>}
+      </div>
     </div>
   );
 }

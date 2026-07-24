@@ -11,15 +11,23 @@ export const tokenStore = {
   clear: () => localStorage.removeItem(TOKEN_KEY),
 };
 
+export interface FieldIssue {
+  field: string;
+  message: string;
+}
+
 export interface ApiError extends Error {
   status?: number;
+  /** Field-level validation issues returned by the API. */
+  details?: FieldIssue[];
 }
 
 interface Envelope<T> {
   success: boolean;
   data: T;
   meta?: Record<string, unknown>;
-  message?: string;
+  /** Failure envelope: { success: false, error: { message, details } }. */
+  error?: { message?: string; details?: FieldIssue[] };
 }
 
 async function call<T>(
@@ -41,8 +49,11 @@ async function call<T>(
 
   const body = (await res.json().catch(() => ({}))) as Envelope<T>;
   if (!res.ok || body.success === false) {
-    const err: ApiError = new Error(body?.message || `Request failed (${res.status})`);
+    // The failure envelope nests everything under `error` — read the real
+    // message and the field-level issues so the UI can show what to fix.
+    const err: ApiError = new Error(body?.error?.message || `Request failed (${res.status})`);
     err.status = res.status;
+    err.details = body?.error?.details;
     throw err;
   }
   return { data: body.data, meta: body.meta };

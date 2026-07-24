@@ -27,7 +27,7 @@ export const profile = {
   ],
   availability: {
     status: 'open',
-    message: 'Open to full-time SDE and backend engineering roles from mid-2026.',
+    message: 'Open to full-time SDE roles',
   },
   resumeUrl: '/Khushi_Nema_Resume.pdf',
   currentFocus: [

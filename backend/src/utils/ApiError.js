@@ -32,12 +32,20 @@ export class ApiError extends Error {
     return new ApiError(409, message);
   }
 
+  static tooLarge(message = 'Payload too large') {
+    return new ApiError(413, message);
+  }
+
   static tooMany(message = 'Too many requests') {
     return new ApiError(429, message);
   }
 
   static internal(message = 'Internal server error') {
     return new ApiError(500, message);
+  }
+
+  static unavailable(message = 'Service temporarily unavailable') {
+    return new ApiError(503, message);
   }
 }
 

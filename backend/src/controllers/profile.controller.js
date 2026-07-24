@@ -40,6 +40,9 @@ export const getOverview = asyncHandler(async (_req, res) => {
 
   if (!profile) throw ApiError.notFound('Portfolio content has not been seeded yet');
 
-  res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+  // Revalidate every time rather than caching blind for a minute: an edit in
+  // the admin dashboard must show up on the site immediately. The ETag still
+  // makes the common case cheap — unchanged content returns a 304.
+  res.set('Cache-Control', 'public, max-age=0, must-revalidate');
   sendSuccess(res, { profile, projects, experience, skills, education, achievements });
 });
