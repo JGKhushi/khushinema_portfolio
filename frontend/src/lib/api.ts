@@ -10,19 +10,38 @@ interface ApiEnvelope<T> {
   error?: { message?: string; details?: { field: string; message: string }[] };
 }
 
+/** Error carrying the HTTP status, or `offline` when the request never landed. */
+export interface RequestError extends Error {
+  status?: number;
+  /** True only when the network call itself failed (server unreachable). */
+  offline?: boolean;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  });
-  const body = (await res.json()) as ApiEnvelope<T>;
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...init,
+    });
+  } catch {
+    // fetch only rejects when the request never reached a server.
+    const err: RequestError = new Error('Could not reach the server');
+    err.offline = true;
+    throw err;
+  }
+
+  const body = (await res.json().catch(() => ({}))) as ApiEnvelope<T>;
   if (!res.ok || body.success === false) {
     // Prefer the first field-level issue — it says exactly what to fix.
     const detail = body?.error?.details?.[0];
-    const message = detail
-      ? `${detail.field}: ${detail.message}`
-      : body?.error?.message || `Request failed with ${res.status}`;
-    throw new Error(message);
+    const err: RequestError = new Error(
+      detail
+        ? `${detail.field}: ${detail.message}`
+        : body?.error?.message || `Request failed with ${res.status}`,
+    );
+    err.status = res.status;
+    throw err;
   }
   return body.data;
 }

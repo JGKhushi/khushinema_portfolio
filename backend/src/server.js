@@ -1,6 +1,7 @@
 import env from './config/env.js';
 import createApp from './app.js';
 import { connectWithRetry, disconnectDB } from './config/db.js';
+import { verifyMailer } from './utils/mailer.js';
 import logger from './utils/logger.js';
 
 async function bootstrap() {
@@ -23,6 +24,9 @@ async function bootstrap() {
   connectWithRetry().then((ok) => {
     if (!ok) logger.warn('Started without a database connection — degraded mode (503 on data routes)');
   });
+
+  // Report mail configuration up front rather than failing silently per message.
+  verifyMailer().catch(() => {});
 
   let shuttingDown = false;
   const shutdown = async (signal) => {

@@ -4,7 +4,7 @@ import { Send, Check, AlertCircle, Loader2, Copy, MapPin } from 'lucide-react';
 import type { Profile } from '../lib/types';
 import { SectionHeader } from '../components/SectionHeader';
 import { Reveal } from '../components/Reveal';
-import { submitContact } from '../lib/api';
+import { submitContact, type RequestError } from '../lib/api';
 import { iconFor } from '../lib/icons';
 
 interface Props {
@@ -32,16 +32,27 @@ export function Contact({ profile }: Props) {
       setForm({ name: '', email: '', subject: '', message: '' });
       setTimeout(() => setStatus('idle'), 5000);
     } catch (err) {
-      // The API may be offline (static hosting). Fall back to a mailto so the
-      // message is never lost.
+      // Tell the visitor what actually went wrong instead of blaming the
+      // network for everything — and never hijack the page to a mail client.
+      const e = err as RequestError;
       setStatus('error');
-      setError('Could not reach the server — opening your email client instead.');
-      const body = encodeURIComponent(`${form.message}\n\n— ${form.name} (${form.email})`);
-      const subject = encodeURIComponent(form.subject || 'Hello from your portfolio');
-      window.location.href = `mailto:${profile.email}?subject=${subject}&body=${body}`;
-      setTimeout(() => setStatus('idle'), 6000);
+
+      if (e.offline) {
+        setError('Could not reach the server. You can email me directly instead.');
+      } else if (e.status === 429) {
+        setError('Too many messages sent from this device. Please try again in an hour, or email me directly.');
+      } else if (e.status === 503) {
+        setError('The server is temporarily unavailable. Please try again shortly, or email me directly.');
+      } else {
+        setError(e.message || 'Something went wrong. Please try again, or email me directly.');
+      }
     }
   }
+
+  /** Pre-filled mail link offered as a fallback — the visitor chooses to use it. */
+  const mailtoHref = `mailto:${profile.email}?subject=${encodeURIComponent(
+    form.subject || 'Hello from your portfolio',
+  )}&body=${encodeURIComponent(`${form.message}\n\n— ${form.name}${form.email ? ` (${form.email})` : ''}`)}`;
 
   function copyEmail() {
     navigator.clipboard?.writeText(profile.email).then(() => {
@@ -186,9 +197,17 @@ export function Contact({ profile }: Props) {
               </motion.button>
 
               {status === 'error' && (
-                <p className="mt-3 flex items-center gap-2 text-sm text-amber-300">
-                  <AlertCircle className="h-4 w-4" /> {error}
-                </p>
+                <div className="mt-3 rounded-lg bg-amber-500/10 px-3.5 py-3 ring-1 ring-amber-500/20">
+                  <p className="flex items-start gap-2 text-sm text-amber-200">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
+                  </p>
+                  <a
+                    href={mailtoHref}
+                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-100 underline underline-offset-2 hover:text-white"
+                  >
+                    <Send className="h-3.5 w-3.5" /> Open email with your message
+                  </a>
+                </div>
               )}
               {status === 'success' && (
                 <p className="mt-3 flex items-center gap-2 text-sm text-emerald-300">

@@ -5,6 +5,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/apiResponse.js';
 import logger from '../utils/logger.js';
+import { sendContactNotification } from '../utils/mailer.js';
 
 export const submitMessage = asyncHandler(async (req, res) => {
   // Honeypot: a real browser leaves this hidden field empty. Bots fill it.
@@ -27,6 +28,18 @@ export const submitMessage = asyncHandler(async (req, res) => {
   });
 
   logger.info(`New contact message from ${message.email}`);
+
+  // Fire-and-forget: the message is already safely persisted, so a slow or
+  // failing mail server must not delay the response or fail the submission.
+  // sendContactNotification never throws, but guard anyway.
+  sendContactNotification({
+    name: message.name,
+    email: message.email,
+    company: message.company,
+    subject: message.subject,
+    message: message.message,
+  }).catch((error) => logger.error('Contact notification failed', error?.message ?? error));
+
   return sendCreated(res, { delivered: true, id: message.id });
 });
 

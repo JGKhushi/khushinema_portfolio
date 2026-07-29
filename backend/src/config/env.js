@@ -17,6 +17,15 @@ const schema = z.object({
   ADMIN_PASSWORD: z.string().min(8).default('ChangeMe123!'),
   RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().positive().default(15),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
+
+  // ── Email (optional) ─────────────────────────────────────────────────────
+  // When unset, contact messages are still saved — just not emailed.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  /** Where notifications land. Falls back to ADMIN_EMAIL. */
+  MAIL_TO: z.string().email().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
