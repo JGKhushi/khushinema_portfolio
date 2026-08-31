@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Portfolio API for Khushi Nema — Express + MongoDB",
+  "description": "Portfolio API for Khushi Nema \u2014 Express + MongoDB",
   "main": "src/server.js",
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
+    "dev": "node api.js && node --watch src/server.js",
+    "start": "node api.js && node src/server.js",
     "seed": "node src/seed/index.js",
     "seed:fresh": "node src/seed/index.js --fresh"
   },
